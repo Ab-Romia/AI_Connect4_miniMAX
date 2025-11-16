@@ -1,6 +1,5 @@
 """
 Connect 4 AI - Beautiful Interactive Interface with Live AI Thinking
-Click anywhere on a column to drop your piece!
 """
 
 import gradio as gr
@@ -109,7 +108,7 @@ def get_status(state):
         else:
             return f"🤝 **DRAW!** | Final Score - You: {p1} | AI: {p2}"
     elif state['current_player'] == 1:
-        return f"🔴 **Your Turn** - Click a column! | You: {p1} | AI: {p2}"
+        return f"🔴 **Your Turn** - Click a column below! | You: {p1} | AI: {p2}"
     else:
         return f"🟡 **AI Analyzing...** | You: {p1} | AI: {p2}"
 
@@ -128,122 +127,64 @@ def check_winner(state):
             state['winner'] = 0
     return state
 
-def process_click(state, evt: gr.SelectData):
-    """Handle click - player move only"""
+def play_move(col, state):
+    """Handle player move and AI response with progressive thinking"""
     if state is None:
         state = create_initial_state()
 
     if state['game_over'] or state['current_player'] != 1:
-        return state, render_board(state), get_status(state)
-
-    x = evt.index[0]
-    col = x // CELL_SIZE
-
-    if col < 0 or col > 6:
-        return state, render_board(state), get_status(state)
+        return state, render_board(state), get_status(state), "Not your turn or game is over."
 
     valid = state['board'].valid_moves()
     if col not in valid:
-        return state, render_board(state), get_status(state)
+        return state, render_board(state), get_status(state), f"❌ Column {col+1} is full!"
 
-    # Make player move immediately
+    # Make player move
     state = copy.deepcopy(state)
     state['board'].move(col, 1)
     check_winner(state)
 
-    if not state['game_over']:
-        state['current_player'] = 2
+    if state['game_over']:
+        return state, render_board(state), get_status(state), "🎮 Game Over! You made a great move!"
 
-    return state, render_board(state), get_status(state)
+    state['current_player'] = 2
 
-def ai_analysis_step1(state):
-    """AI thinking step 1"""
-    if state is None or state['game_over'] or state['current_player'] != 2:
-        return "Waiting for your move..."
-
-    time.sleep(0.3)
-
-    depth = state['ai_depth']
-    valid = state['board'].valid_moves()
-
-    text = "🧠 **AI ANALYSIS STARTED**\n\n"
-    text += "```\n"
-    text += f"Search Depth: {depth} moves\n"
-    text += f"Evaluating: {len(valid)} columns\n"
-    text += "```\n\n"
-    text += "⏳ Computing position scores..."
-
-    return text
-
-def ai_analysis_step2(state):
-    """AI thinking step 2 - column evaluation"""
-    if state is None or state['game_over'] or state['current_player'] != 2:
-        return "Waiting..."
-
-    time.sleep(0.4)
-
+    # Now do AI analysis with progressive display
     board = state['board']
     depth = state['ai_depth']
-    valid = board.valid_moves()
+    valid_moves = board.valid_moves()
 
-    text = "🧠 **POSITION EVALUATION**\n\n"
-    text += "```\n"
+    if not valid_moves:
+        state['game_over'] = True
+        return state, render_board(state), get_status(state), "No valid moves for AI!"
 
-    for col in valid:
-        board.move(col, 2)
+    # Build progressive thinking display
+    thinking = "🧠 **AI ANALYSIS**\n\n"
+    thinking += f"```\nSearch Depth: {depth} moves\nEvaluating: {len(valid_moves)} columns\n```\n\n"
+
+    # Evaluate each column
+    thinking += "**Position Scores:**\n```\n"
+    for c in valid_moves:
+        board.move(c, 2)
         score = evaluate_board(board)
-        board.undo(col, 2)
-
+        board.undo(c, 2)
         bar_len = int(min(12, max(0, (score + 5000) / 850)))
         bar = "█" * bar_len + "░" * (12 - bar_len)
-        text += f"Col {col+1}: [{bar}] {score:+,}\n"
+        thinking += f"Col {c+1}: [{bar}] {score:+,}\n"
+    thinking += "```\n\n"
 
-    text += "```\n\n"
-    text += "🔍 Running minimax with alpha-beta pruning..."
-
-    return text
-
-def ai_analysis_final(state):
-    """AI thinking final step and make move"""
-    if state is None or state['game_over'] or state['current_player'] != 2:
-        return state, render_board(state) if state else None, get_status(state) if state else "", "Waiting..."
-
-    time.sleep(0.5)
-
-    state = copy.deepcopy(state)
-    board = state['board']
-    depth = state['ai_depth']
-    valid = board.valid_moves()
-
-    if not valid:
-        state['game_over'] = True
-        return state, render_board(state), get_status(state), "No valid moves!"
-
-    # Get best move
+    # Get best move with minimax
+    thinking += "🔍 **Minimax Search Complete**\n\n"
     best_col, best_score = minimax(
         board, depth=depth,
         alpha=float('-inf'), beta=float('inf'),
         maximizing_player=True, return_tree=False
     )
 
-    # Build final analysis text
-    text = "🧠 **DECISION COMPLETE**\n\n"
-    text += "**Column Scores:**\n```\n"
+    thinking += f"✅ **CHOSEN: Column {best_col + 1}**\n"
+    thinking += f"💯 **Score: {best_score:+,}**\n\n"
 
-    for col in valid:
-        board.move(col, 2)
-        score = evaluate_board(board)
-        board.undo(col, 2)
-        bar_len = int(min(12, max(0, (score + 5000) / 850)))
-        bar = "█" * bar_len + "░" * (12 - bar_len)
-        marker = " ◄ BEST" if col == best_col else ""
-        text += f"Col {col+1}: [{bar}] {score:+,}{marker}\n"
-
-    text += "```\n\n"
-    text += f"✅ **CHOSEN: Column {best_col + 1}**\n"
-    text += f"💯 **Score: {best_score:+,}**\n\n"
-
-    # Strategy
+    # Strategy explanation
     if best_score > 100000:
         strat = "🎯 **WINNING MOVE!**"
     elif best_score > 10000:
@@ -257,16 +198,16 @@ def ai_analysis_final(state):
     else:
         strat = "⚠️ **Damage Control**"
 
-    text += f"Strategy: {strat}"
+    thinking += f"Strategy: {strat}"
 
-    # Make the move
-    if best_col in valid:
+    # Make AI move
+    if best_col in valid_moves:
         state['board'].move(best_col, 2)
         check_winner(state)
         if not state['game_over']:
             state['current_player'] = 1
 
-    return state, render_board(state), get_status(state), text
+    return state, render_board(state), get_status(state), thinking
 
 def reset_game(difficulty):
     """Reset game"""
@@ -277,8 +218,8 @@ def reset_game(difficulty):
     welcome = f"🎮 **NEW GAME - {difficulty}**\n\n"
     welcome += "🔴 You are **RED**\n"
     welcome += "🟡 AI is **YELLOW**\n\n"
-    welcome += "**Click anywhere on a column** to drop!\n\n"
-    welcome += "Watch the AI think in real-time!"
+    welcome += "**Click a column button below** to drop your piece!\n\n"
+    welcome += "Watch the AI's thought process as it analyzes each move!"
 
     return state, render_board(state), get_status(state), welcome
 
@@ -307,18 +248,13 @@ css = """
 .board-wrapper img {
     border-radius: 25px !important;
     box-shadow: 0 30px 100px rgba(0, 0, 0, 0.7), 0 0 80px rgba(26, 60, 138, 0.4) !important;
-    cursor: pointer !important;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
     animation: slideIn 0.5s ease-out !important;
 }
 
-.board-wrapper img:hover {
-    transform: scale(1.03) translateY(-5px) !important;
+.board-wrapper:hover img {
+    transform: scale(1.02) translateY(-3px) !important;
     box-shadow: 0 40px 120px rgba(0, 0, 0, 0.8), 0 0 100px rgba(26, 60, 138, 0.5) !important;
-}
-
-.board-wrapper img:active {
-    transform: scale(0.98) !important;
 }
 
 .status-bar {
@@ -331,7 +267,6 @@ css = """
     box-shadow: 0 12px 40px rgba(102, 126, 234, 0.6) !important;
     margin: 20px 0 !important;
     animation: fadeIn 0.5s ease-out !important;
-    transition: all 0.3s ease !important;
 }
 
 .thinking-panel {
@@ -347,7 +282,37 @@ css = """
     box-shadow: 0 0 50px rgba(0, 255, 136, 0.25) !important;
     animation: pulse 3s infinite !important;
     overflow-y: auto !important;
-    transition: all 0.3s ease !important;
+}
+
+.column-buttons {
+    display: flex !important;
+    gap: 12px !important;
+    justify-content: center !important;
+    margin: 15px 0 !important;
+}
+
+.column-btn {
+    width: 90px !important;
+    height: 60px !important;
+    font-size: 1.4em !important;
+    font-weight: bold !important;
+    border-radius: 15px !important;
+    background: linear-gradient(180deg, #3a7bd5, #00d2ff) !important;
+    color: white !important;
+    border: none !important;
+    cursor: pointer !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 0 8px 25px rgba(0, 210, 255, 0.3) !important;
+}
+
+.column-btn:hover {
+    transform: translateY(-6px) scale(1.08) !important;
+    box-shadow: 0 15px 35px rgba(0, 210, 255, 0.5) !important;
+    background: linear-gradient(180deg, #00d2ff, #3a7bd5) !important;
+}
+
+.column-btn:active {
+    transform: translateY(-2px) scale(0.95) !important;
 }
 
 .control-area {
@@ -388,10 +353,6 @@ button:hover {
     box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4) !important;
 }
 
-button:active {
-    transform: translateY(-2px) scale(0.98) !important;
-}
-
 label, .label-wrap span {
     color: #b0c4e8 !important;
     font-weight: 500 !important;
@@ -399,7 +360,7 @@ label, .label-wrap span {
 
 footer { display: none !important; }
 
-/* Remove image toolbar */
+/* Hide image toolbar */
 .image-frame > div:last-child {
     display: none !important;
 }
@@ -412,7 +373,7 @@ with gr.Blocks(title="Connect 4 AI", css=css, theme=gr.themes.Base()) as demo:
 
     gr.Markdown("""
     # 🎮 CONNECT 4 AI
-    ### Click on the board to play • Watch AI think in real-time!
+    ### Beautiful Board • Smart AI • Real-time Analysis
     """)
 
     with gr.Row():
@@ -428,6 +389,17 @@ with gr.Blocks(title="Connect 4 AI", css=css, theme=gr.themes.Base()) as demo:
                 show_fullscreen_button=False,
                 elem_classes=["board-wrapper"]
             )
+
+            # Column selection buttons
+            gr.Markdown("### 👇 Click a Column to Drop Your Piece", elem_classes=["column-label"])
+            with gr.Row(elem_classes=["column-buttons"]):
+                btn1 = gr.Button("1", elem_classes=["column-btn"])
+                btn2 = gr.Button("2", elem_classes=["column-btn"])
+                btn3 = gr.Button("3", elem_classes=["column-btn"])
+                btn4 = gr.Button("4", elem_classes=["column-btn"])
+                btn5 = gr.Button("5", elem_classes=["column-btn"])
+                btn6 = gr.Button("6", elem_classes=["column-btn"])
+                btn7 = gr.Button("7", elem_classes=["column-btn"])
 
             status_box = gr.Markdown(
                 value=get_status(create_initial_state()),
@@ -448,7 +420,7 @@ with gr.Blocks(title="Connect 4 AI", css=css, theme=gr.themes.Base()) as demo:
             gr.Markdown("### 🧠 AI Thought Process")
 
             thinking_box = gr.Markdown(
-                value="Click on the board to make your move!\n\nWatch the AI's real-time analysis here.",
+                value="Click a column button to make your move!\n\nWatch the AI's real-time analysis here.",
                 elem_classes=["thinking-panel"]
             )
 
@@ -456,7 +428,7 @@ with gr.Blocks(title="Connect 4 AI", css=css, theme=gr.themes.Base()) as demo:
                 gr.Markdown("""
                 ### 📖 How to Play
 
-                **Click directly on any column** to drop your piece!
+                **Click the numbered buttons** to drop your piece in that column!
 
                 - 🔴 **You** = Red
                 - 🟡 **AI** = Yellow
@@ -464,37 +436,29 @@ with gr.Blocks(title="Connect 4 AI", css=css, theme=gr.themes.Base()) as demo:
                 - Vertical = **11× bonus!**
                 - Most points = **WIN**
 
-                AI uses minimax with alpha-beta pruning to find optimal moves!
+                AI uses minimax with alpha-beta pruning!
                 """)
 
-    # Event chain: Click -> Player move -> AI thinks (3 steps) -> AI moves
-    board_img.select(
-        fn=process_click,
-        inputs=[state],
-        outputs=[state, board_img, status_box]
-    ).then(
-        fn=ai_analysis_step1,
-        inputs=[state],
-        outputs=[thinking_box]
-    ).then(
-        fn=ai_analysis_step2,
-        inputs=[state],
-        outputs=[thinking_box]
-    ).then(
-        fn=ai_analysis_final,
-        inputs=[state],
-        outputs=[state, board_img, status_box, thinking_box]
-    )
+    # Wire up column buttons
+    outputs = [state, board_img, status_box, thinking_box]
+
+    btn1.click(fn=lambda s: play_move(0, s), inputs=[state], outputs=outputs)
+    btn2.click(fn=lambda s: play_move(1, s), inputs=[state], outputs=outputs)
+    btn3.click(fn=lambda s: play_move(2, s), inputs=[state], outputs=outputs)
+    btn4.click(fn=lambda s: play_move(3, s), inputs=[state], outputs=outputs)
+    btn5.click(fn=lambda s: play_move(4, s), inputs=[state], outputs=outputs)
+    btn6.click(fn=lambda s: play_move(5, s), inputs=[state], outputs=outputs)
+    btn7.click(fn=lambda s: play_move(6, s), inputs=[state], outputs=outputs)
 
     new_game_btn.click(
         fn=reset_game,
         inputs=[difficulty],
-        outputs=[state, board_img, status_box, thinking_box]
+        outputs=outputs
     )
 
     demo.load(
         fn=lambda: reset_game("Medium (4)"),
-        outputs=[state, board_img, status_box, thinking_box]
+        outputs=outputs
     )
 
 if __name__ == "__main__":
