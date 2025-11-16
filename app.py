@@ -17,6 +17,7 @@ def create_initial_state():
         'game_over': False,
         'ai_depth': 4,
         'winner': None,
+        'last_move': None,  # Track (row, col) of last move for animation
     }
 
 def create_board_html(state):
@@ -24,6 +25,7 @@ def create_board_html(state):
     board = state['board']
     p1 = board.connect_4s(1)
     p2 = board.connect_4s(2)
+    last_move = state.get('last_move', None)
 
     # Status
     if state['game_over']:
@@ -43,9 +45,9 @@ def create_board_html(state):
         status = "🟡 AI Thinking..."
         status_class = "ai-turn"
 
-    # Build board HTML
+    # Build board HTML with data attributes for hover targeting
     cells = ""
-    for row in range(5, -1, -1):  # Top to bottom
+    for row in range(5, -1, -1):  # Top to bottom (display row 5 at top)
         for col in range(7):
             bit_pos = 1 << (row * 7 + col)
             if board.player1 & bit_pos:
@@ -55,7 +57,12 @@ def create_board_html(state):
             else:
                 piece_class = "empty"
 
-            cells += f'<div class="cell" data-col="{col}"><div class="piece {piece_class}"></div></div>'
+            # Add animation class only for the last placed piece
+            anim_class = ""
+            if last_move and last_move == (row, col):
+                anim_class = " new-piece"
+
+            cells += f'<div class="cell" data-col="{col}" data-row="{row}"><div class="piece {piece_class}{anim_class}"></div></div>'
 
     html = f'''
     <div class="connect4-game">
@@ -111,8 +118,12 @@ def player_move(col, state):
     if col not in valid:
         return state, create_board_html(state), f"❌ Column {col+1} is full!"
 
+    # Get the row where piece will land
+    landing_row = state['board'].height(col)
+
     # Make move immediately
     state['board'].move(col, 1)
+    state['last_move'] = (landing_row, col)  # Track for animation
     check_winner(state)
 
     if state['game_over']:
@@ -226,7 +237,10 @@ def ai_think_phase3(state):
 
     # Make AI move
     if best_col in valid:
+        # Get the row where piece will land
+        landing_row = state['board'].height(best_col)
         state['board'].move(best_col, 2)
+        state['last_move'] = (landing_row, best_col)  # Track for animation
         check_winner(state)
         if not state['game_over']:
             state['current_player'] = 1
@@ -236,8 +250,9 @@ def ai_think_phase3(state):
 def reset_game(difficulty):
     """Reset game"""
     state = create_initial_state()
-    depth_map = {"Easy (2)": 2, "Medium (4)": 4, "Hard (6)": 6, "Expert (8)": 8}
-    state['ai_depth'] = depth_map.get(difficulty, 4)
+    # Optimized depths for better performance while maintaining challenge
+    depth_map = {"Easy": 2, "Medium": 3, "Hard": 4, "Expert": 5}
+    state['ai_depth'] = depth_map.get(difficulty, 3)
 
     welcome = f"""🎮 **NEW GAME STARTED!**
 
@@ -382,8 +397,18 @@ custom_css = """
 }
 
 .cell:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Highlight only the specific target cell */
+.cell.hover-target {
+    background: rgba(255, 255, 255, 0.25);
     transform: scale(1.08);
+}
+
+.cell.hover-target .piece.empty {
+    background: radial-gradient(circle at 35% 35%, #ff9999, #ff6666);
+    opacity: 0.6;
 }
 
 .piece {
@@ -404,7 +429,6 @@ custom_css = """
         0 6px 20px rgba(255, 71, 87, 0.6),
         inset 0 -6px 15px rgba(0, 0, 0, 0.3),
         inset 0 6px 15px rgba(255, 255, 255, 0.3);
-    animation: dropIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
 .piece.yellow {
@@ -413,6 +437,10 @@ custom_css = """
         0 6px 20px rgba(255, 165, 2, 0.6),
         inset 0 -6px 15px rgba(0, 0, 0, 0.3),
         inset 0 6px 15px rgba(255, 255, 255, 0.3);
+}
+
+/* Animation only for newly placed pieces */
+.piece.new-piece {
     animation: dropIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
@@ -495,12 +523,58 @@ label, .label-wrap span {
     color: #a8b8d8 !important;
 }
 
+/* Fix dropdown to open downwards */
+.gradio-dropdown {
+    position: relative !important;
+}
+
+.gradio-dropdown > div[data-testid="dropdown"] {
+    position: relative !important;
+}
+
+.gradio-dropdown ul, .gradio-dropdown [role="listbox"] {
+    position: absolute !important;
+    top: 100% !important;
+    bottom: auto !important;
+    max-height: 200px !important;
+    overflow-y: auto !important;
+    z-index: 9999 !important;
+}
+
 footer { display: none !important; }
 """
 
 # JavaScript for click handling
 click_js = """
 () => {
+    const findTargetCell = (col) => {
+        // Find the lowest empty cell in the column
+        const cells = document.querySelectorAll('.cell');
+        let lowestEmpty = null;
+        let lowestRow = -1;
+
+        cells.forEach(cell => {
+            const cellCol = parseInt(cell.getAttribute('data-col'));
+            const cellRow = parseInt(cell.getAttribute('data-row'));
+            if (cellCol === col) {
+                const piece = cell.querySelector('.piece');
+                if (piece && piece.classList.contains('empty')) {
+                    if (cellRow > lowestRow) {
+                        lowestRow = cellRow;
+                        lowestEmpty = cell;
+                    }
+                }
+            }
+        });
+        return lowestEmpty;
+    };
+
+    const clearHoverTargets = () => {
+        document.querySelectorAll('.hover-target').forEach(el => {
+            el.classList.remove('hover-target');
+        });
+    };
+
     const setupClicks = () => {
         const cells = document.querySelectorAll('.cell');
         cells.forEach(cell => {
@@ -510,6 +584,22 @@ click_js = """
                     const btn = document.getElementById('col-btn-' + col);
                     if (btn) btn.click();
                 }
+            };
+
+            // Hover to show target slot
+            cell.onmouseenter = (e) => {
+                clearHoverTargets();
+                const col = parseInt(cell.getAttribute('data-col'));
+                if (!isNaN(col)) {
+                    const target = findTargetCell(col);
+                    if (target) {
+                        target.classList.add('hover-target');
+                    }
+                }
+            };
+
+            cell.onmouseleave = (e) => {
+                clearHoverTargets();
             };
         });
     };
@@ -553,8 +643,8 @@ with gr.Blocks(title="Connect 4 AI", css=custom_css, theme=gr.themes.Base()) as 
             with gr.Group(elem_classes=["controls-area"]):
                 with gr.Row():
                     difficulty = gr.Dropdown(
-                        choices=["Easy (2)", "Medium (4)", "Hard (6)", "Expert (8)"],
-                        value="Medium (4)",
+                        choices=["Easy", "Medium", "Hard", "Expert"],
+                        value="Medium",
                         label="🎯 AI Difficulty",
                         scale=2
                     )
@@ -617,7 +707,7 @@ with gr.Blocks(title="Connect 4 AI", css=custom_css, theme=gr.themes.Base()) as 
 
     # Initialize
     demo.load(
-        fn=lambda: reset_game("Medium (4)"),
+        fn=lambda: reset_game("Medium"),
         outputs=[state, board_html, thinking],
         js=click_js
     )
